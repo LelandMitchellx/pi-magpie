@@ -35,13 +35,13 @@ export class MagpieDownloader {
     let localFileName = "";
 
     if (platform === "win32") {
-      assetName = arch === "arm64" ? "magpie-windows-arm64.exe" : "magpie-windows-amd64.exe";
+      assetName = arch === "arm64" ? "magpie-cli-windows-arm64.exe" : "magpie-cli-windows-amd64.exe";
       localFileName = "magpie.exe";
     } else if (platform === "darwin") {
       assetName = arch === "arm64" ? "magpie-cli-darwin-arm64" : "magpie-cli-darwin-amd64";
       localFileName = "magpie";
     } else {
-      assetName = arch === "arm64" ? "magpie-linux-arm64" : "magpie-linux-amd64";
+      assetName = arch === "arm64" ? "magpie-cli-linux-arm64" : "magpie-cli-linux-amd64";
       localFileName = "magpie";
     }
 

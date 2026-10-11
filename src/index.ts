@@ -28,6 +28,10 @@ export default function magpieExtension(pi: {
     cleanup();
     process.exit(0);
   });
+  process.once("SIGHUP", () => {
+    cleanup();
+    process.exit(0);
+  });
 
   // 2. 注册极简 Slash 命令 /magpie
   pi.registerCommand("magpie", createMagpieCommand());
