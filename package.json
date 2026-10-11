@@ -1,0 +1,32 @@
+{
+  "name": "pi-magpie",
+  "version": "0.1.0",
+  "description": "Pi extension to manage local Magpie AI gateway and unified web dashboard",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "magpie",
+    "model-management"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && node --experimental-strip-types --test test/coordinator.test.ts test/cli.test.ts"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.7.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "type": "module"
+}

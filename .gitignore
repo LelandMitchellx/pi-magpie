@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Local & Downloaded Binaries
+bin/*
+!bin/.gitkeep
+
+# Pi Local Session & Cache
+.pi/
+
+# Logs & Temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
