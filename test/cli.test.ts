@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MagpieCLI } from "../src/magpie-cli.ts";
+import { MagpieDownloader } from "../src/downloader.ts";
 
 test("MagpieCLI: 默认地址与环境变量覆盖", () => {
   const cli = new MagpieCLI();
@@ -67,5 +68,19 @@ test("MagpieCLI: Web 控制台免密 URL 与 Key 机制", () => {
     } else {
       delete process.env.MAGPIE_WEB_KEY;
     }
+  }
+});
+
+test("MagpieDownloader: 跨平台路径计算与 bin 目录自愈", () => {
+  const downloader = new MagpieDownloader();
+  const info = downloader.getTargetExecutableInfo();
+  const binDir = downloader.getPluginBinDir();
+
+  assert.ok(binDir.endsWith("bin"), "应当正确计算 bin 目录绝对路径");
+  assert.ok(info.localPath.startsWith(binDir), "目标可执行文件应当位于 bin 目录下");
+  if (process.platform === "win32") {
+    assert.equal(info.localPath.endsWith("magpie.exe"), true, "Windows 下应当为 magpie.exe");
+  } else {
+    assert.equal(info.localPath.endsWith("magpie"), true, "Unix 下应当为 magpie");
   }
 });
