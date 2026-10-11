@@ -19,13 +19,14 @@
 ---
 
 ## 3. 跨平台二进制命名规范与 Unix 执行权限
-- **踩坑现象**：从 GitHub Releases 自动拉取资产时，不同操作系统的包命名格式各不相同，且在 Linux/macOS 下载完成后直接 `spawn` 会报错 `EACCES`（无执行权限）。
+- **踩坑现象**：从 GitHub Releases 自动拉取资产时，不同操作系统的包命名格式各不相同（曾误以为 Linux 为 `magpie-linux-amd64` 导致 404），且在 Linux/macOS 下载完成后直接 `spawn` 会报错 `EACCES`（无执行权限）。
 - **根因剖析**：
-  - Windows 发布包名为 `magpie-windows-amd64.exe`，可执行文件带扩展名；
-  - macOS 发布包名为 `magpie-cli-darwin-arm64` / `magpie-cli-darwin-amd64`；
-  - Linux 发布包名为 `magpie-linux-amd64`；
+  - Magpie 官方最新 Releases 统一采用带有 `-cli-` 前缀的资产命名规范：
+    * Windows: `magpie-cli-windows-amd64.exe` / `magpie-cli-windows-arm64.exe`；
+    * macOS: `magpie-cli-darwin-arm64` / `magpie-cli-darwin-amd64`；
+    * Linux: `magpie-cli-linux-amd64` / `magpie-cli-linux-arm64`；
   - 通过 HTTP 流写入的文件在类 Unix 系统中默认只有只读/只写权限（如 0644），缺少可执行位（+x）。
-- **工程解法**：编写平台与架构匹配矩阵映射正确的 Asset 名称，并在 Unix 环境下载完成后，主动调用 `chmodSync(localPath, 0o755)` 补齐可执行权限。
+- **工程解法**：基于官方真实发布的资产列表对齐命名映射矩阵，并在 Unix 环境下载完成后，主动调用 `chmodSync(localPath, 0o755)` 补齐可执行权限。
 
 ---
 
@@ -33,3 +34,10 @@
 - **踩坑现象**：当将插件作为独立 MCP Server 挂载到外部客户端时，初始化握手偶发 JSON 解析失败。
 - **根因剖析**：标准 MCP 协议在 stdio 模式下，将进程的 `stdout` 作为绝对严格的 JSON-RPC 消息传输通道。如果在 CLI 执行、日志打印或下载进度通知中不小心用了 `console.log` 输出纯文本，这些文本就会混入 `stdout`，导致客户端的反序列化器崩溃。
 - **工程解法**：所有非 JSON-RPC 响应的辅助日志、调试输出与警告全部严格重定向到 `stderr`（`process.stderr.write`），确保 `stdout` 只传输合法的 JSON-RPC 报文。
+
+---
+
+## 5. Linux 终端断开与 SIGHUP 会话挂断信号回收
+- **踩坑现象**：在 Linux / macOS 上，当用户通过 SSH 连接或直接关闭终端窗口标签页时，Pi 进程被关闭，但后台托管的 Magpie 网关未能及时触发清理，残留在系统后台。
+- **根因剖析**：原本仅监听了 `SIGINT` (Ctrl+C) 与 `SIGTERM` 信号。当 SSH 会话意外断开或终端被强制关闭时，系统向首领进程发送的是 `SIGHUP` (Hangup) 信号。若未注册该信号钩子，进程默认退出时不会执行清理流程。
+- **工程解法**：在扩展入口补充对 `SIGHUP` 信号的监听并挂接 `handleSessionShutdown()`，确保在 SSH 会话中断或窗口关闭时，依然能够及时注销信标并触发归零即刻销毁。
