@@ -2,8 +2,7 @@
 node_modules/
 
 # Local & Downloaded Binaries
-bin/*
-!bin/.gitkeep
+bin/
 
 # Pi Local Session & Cache
 .pi/
