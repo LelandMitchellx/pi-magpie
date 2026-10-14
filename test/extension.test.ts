@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import magpieExtension from "../src/index.ts";
 import { gatewayService } from "../src/gateway-service.ts";
-import { createMagpieCommand } from "../src/commands.ts";
+import { createMagpieCommand, getMagpieArgumentCompletions, MAGPIE_SUBCOMMANDS } from "../src/commands.ts";
 
 test("magpieExtension: session_shutdown 会话切换防重启防护", () => {
   const handlers: Record<string, ((event: any, ctx: any) => void)[]> = {};
@@ -166,4 +166,50 @@ test("magpieCommand: 网关后台启动中提前执行 /magpie 即刻返回启�
   } finally {
     gatewayService.isStarting = originalIsStarting;
   }
+});
+
+test("magpieCommand: getArgumentCompletions 子命令自动补全与候选推导", () => {
+  const cmd = createMagpieCommand();
+  assert.equal(typeof cmd.getArgumentCompletions, "function", "createMagpieCommand 必须声明 getArgumentCompletions");
+
+  // 1. 空前缀或空白字符前缀：返回所有可用子命令列表
+  const allEmpty = getMagpieArgumentCompletions("");
+  assert.ok(Array.isArray(allEmpty), "空前缀应返回数组");
+  assert.equal(allEmpty.length, 3, "当前应提供 upgrade, restart, status 3 个子命令");
+  assert.deepEqual(
+    allEmpty.map((i) => i.value),
+    ["upgrade", "restart", "status"],
+    "必须包含完整子命令列表"
+  );
+
+  const allSpaces = getMagpieArgumentCompletions("   ");
+  assert.equal(allSpaces?.length, 3, "空白字符串前缀也应返回完整子命令列表");
+
+  // 2. 字段规范校验：每个候选均需具备 value、label 和描述文本
+  for (const item of MAGPIE_SUBCOMMANDS) {
+    assert.ok(item.value && item.value.trim().length > 0, "必须具备非空 value");
+    assert.ok(item.label && item.label.trim().length > 0, "必须具备非空 label");
+    assert.ok(item.description && item.description.trim().length > 0, "必须具备非空 description 帮助说明");
+  }
+
+  // 3. 前缀模糊匹配
+  const upMatch = getMagpieArgumentCompletions("up");
+  assert.deepEqual(upMatch?.map((i) => i.value), ["upgrade"], "'up' 前缀应匹配 upgrade");
+
+  const updateMatch = getMagpieArgumentCompletions("update");
+  assert.deepEqual(updateMatch?.map((i) => i.value), ["upgrade"], "'update' 别名前缀应重定向推荐 upgrade");
+
+  const reMatch = getMagpieArgumentCompletions("re");
+  assert.deepEqual(reMatch?.map((i) => i.value), ["restart"], "'re' 前缀应匹配 restart");
+
+  const statMatch = getMagpieArgumentCompletions("stat");
+  assert.deepEqual(statMatch?.map((i) => i.value), ["status"], "'stat' 前缀应匹配 status");
+
+  // 4. 无匹配项返回 null
+  const noneMatch = getMagpieArgumentCompletions("unknown");
+  assert.equal(noneMatch, null, "未知前缀应返回 null");
+
+  // 5. 子命令已输入完毕后输入后续参数时返回 null
+  const extraArgs = getMagpieArgumentCompletions("upgrade extra");
+  assert.equal(extraArgs, null, "已输入完整子命令并接后续参数时应返回 null，避免阻断参数输入");
 });

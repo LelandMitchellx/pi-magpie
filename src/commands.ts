@@ -75,12 +75,42 @@ async function handleMagpieRestart(ctx: { ui: { notify: (msg: string, level?: "i
   ctx.ui.notify(res.message, res.success ? "info" : "error");
 }
 
+export interface MagpieSubcommandCompletion {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export const MAGPIE_SUBCOMMANDS: readonly MagpieSubcommandCompletion[] = [
+  { value: "upgrade", label: "upgrade", description: "受控平滑升级 Magpie 二进制并重启服务" },
+  { value: "restart", label: "restart", description: "重启 Magpie 网关服务" },
+  { value: "status", label: "status", description: "查看 Magpie 网关状态与 Web 控制面板" }
+];
+
+export function getMagpieArgumentCompletions(prefix: string): MagpieSubcommandCompletion[] | null {
+  const trimmed = (prefix || "").trimStart();
+  const [sub, ...rest] = trimmed.split(/\s+/);
+
+  // 若已输入完成第一级子命令并在输入更多参数（当前无二级参数），返回 null
+  if (rest.length > 0) {
+    return null;
+  }
+
+  const query = (sub || "").toLowerCase();
+  const filtered = MAGPIE_SUBCOMMANDS.filter((item) =>
+    item.value.startsWith(query) || (item.value === "upgrade" && "update".startsWith(query))
+  );
+
+  return filtered.length > 0 ? filtered : null;
+}
+
 /**
  * 创建 /magpie 指令配置对象（由 TypeScript 自动推导结构）
  */
 export function createMagpieCommand() {
   return {
-    description: "查看 Magpie 网关状态或受控升级重启 (/magpie [upgrade|restart])",
+    description: "查看 Magpie 网关状态或受控升级重启 (/magpie [upgrade|restart|status])",
+    getArgumentCompletions: getMagpieArgumentCompletions,
     handler: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
       const sub = (args || "").trim().toLowerCase();
       if (sub === "upgrade" || sub === "update") {
