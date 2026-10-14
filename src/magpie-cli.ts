@@ -2,7 +2,7 @@ import { binaryResolver } from "./binary-resolver.ts";
 import { configManager } from "./config.ts";
 import type { DownloadProgress } from "./downloader.ts";
 import { gatewayClient } from "./gateway-client.ts";
-import { gatewayService } from "./gateway-service.ts";
+import { gatewayService, type EnsureGatewayOptions } from "./gateway-service.ts";
 import { sessionCoordinator, type ManagedServiceInfo } from "./session-coordinator.ts";
 import { webDashboard } from "./web-dashboard.ts";
 
@@ -68,12 +68,12 @@ export class MagpieCLI {
     return gatewayClient.isHealthy();
   }
 
-  async ensureGateway(): Promise<{ running: boolean; message: string; spawned: boolean }> {
-    return gatewayService.ensureGateway();
+  async ensureGateway(options?: EnsureGatewayOptions): Promise<{ running: boolean; message: string; spawned: boolean }> {
+    return gatewayService.ensureGateway(options);
   }
 
-  async ensureService(requireWeb: boolean): Promise<{ running: boolean; message: string; spawned: boolean }> {
-    return gatewayService.ensureService(requireWeb);
+  async ensureService(requireWeb: boolean, options?: EnsureGatewayOptions): Promise<{ running: boolean; message: string; spawned: boolean }> {
+    return gatewayService.ensureService(requireWeb, options);
   }
 
   getWebKey(): string | null {

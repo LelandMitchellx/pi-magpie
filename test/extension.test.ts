@@ -53,3 +53,78 @@ test("magpieExtension: session_shutdown 会话切换防重启防护", () => {
     gatewayService.handleSessionShutdown = originalShutdown;
   }
 });
+
+test("magpieExtension: session_start 启动中、启动完成与失败提示", async () => {
+  const handlers: Record<string, ((event: any, ctx: any) => Promise<void>)[]> = {};
+  const fakePi = {
+    registerCommand: () => {},
+    on: (event: string, handler: any) => {
+      handlers[event] = handlers[event] || [];
+      handlers[event].push(handler);
+    }
+  };
+
+  magpieExtension(fakePi);
+  const startHandlers = handlers["session_start"];
+  assert.ok(startHandlers && startHandlers.length > 0, "应当注册 session_start 监听器");
+  const onSessionStart = startHandlers[0];
+
+  const originalEnsure = gatewayService.ensureGateway;
+
+  try {
+    // 1. 成功拉起场景：应触发“正在启动中”与“启动完毕”通知
+    const notifications: { msg: string; level?: string }[] = [];
+    const fakeCtx = {
+      ui: {
+        notify: (msg: string, level?: "info" | "warning" | "error") => {
+          notifications.push({ msg, level });
+        }
+      }
+    };
+
+    gatewayService.ensureGateway = async (options) => {
+      options?.onStarting?.();
+      return { running: true, message: "启动成功", spawned: true };
+    };
+
+    await onSessionStart({}, fakeCtx);
+    assert.equal(notifications.length, 2, "成功启动时应产生 2 条通知（启动中 + 启动完毕）");
+    assert.ok(notifications[0].msg.includes("正在启动中"), "第一条通知应为正在启动中");
+    assert.equal(notifications[0].level, "info");
+    assert.ok(notifications[1].msg.includes("启动完毕"), "第二条通知应为启动完毕");
+    assert.equal(notifications[1].level, "info");
+
+    // 2. 启动失败场景：应产生“启动失败”通知并标记为 error
+    notifications.length = 0;
+    gatewayService.ensureGateway = async () => {
+      return { running: false, message: "端口已被占用", spawned: false };
+    };
+
+    await onSessionStart({}, fakeCtx);
+    assert.equal(notifications.length, 1, "失败时应产生 1 条通知");
+    assert.ok(notifications[0].msg.includes("Magpie 启动失败: 端口已被占用"), "应包含失败原因");
+    assert.equal(notifications[0].level, "error");
+
+    // 3. 抛出异常场景：应产生“启动异常”通知并标记为 error
+    notifications.length = 0;
+    gatewayService.ensureGateway = async () => {
+      throw new Error("spawn failed ENOENT");
+    };
+
+    await onSessionStart({}, fakeCtx);
+    assert.equal(notifications.length, 1, "异常时应产生 1 条通知");
+    assert.ok(notifications[0].msg.includes("Magpie 启动异常: spawn failed ENOENT"), "应包含异常信息");
+    assert.equal(notifications[0].level, "error");
+
+    // 4. 已有服务复用场景 (res.running && !res.spawned)：应保持静默，不弹出启动提示
+    notifications.length = 0;
+    gatewayService.ensureGateway = async () => {
+      return { running: true, message: "已复用活跃服务", spawned: false };
+    };
+
+    await onSessionStart({}, fakeCtx);
+    assert.equal(notifications.length, 0, "复用已有服务时不应触发通知弹窗");
+  } finally {
+    gatewayService.ensureGateway = originalEnsure;
+  }
+});

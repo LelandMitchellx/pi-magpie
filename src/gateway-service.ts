@@ -2,9 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { binaryResolver } from "./binary-resolver.ts";
 import { configManager } from "./config.ts";
+import type { DownloadProgress } from "./downloader.ts";
 import { gatewayClient } from "./gateway-client.ts";
 import { sessionCoordinator } from "./session-coordinator.ts";
 import { webDashboard } from "./web-dashboard.ts";
+
+export interface EnsureGatewayOptions {
+  onStarting?: () => void;
+  onProgress?: (progress: DownloadProgress) => void;
+}
 
 class GatewayService {
   private serviceProcess: ChildProcess | null = null;
@@ -33,8 +39,8 @@ class GatewayService {
   /**
    * 确保网关正在运行；由单个 magpie web 进程提供
    */
-  async ensureGateway(): Promise<{ running: boolean; message: string; spawned: boolean }> {
-    return this.ensureService(false);
+  async ensureGateway(options?: EnsureGatewayOptions): Promise<{ running: boolean; message: string; spawned: boolean }> {
+    return this.ensureService(false, options);
   }
 
   async isWebResponding(): Promise<boolean> {
@@ -53,7 +59,7 @@ class GatewayService {
   /**
    * 确保服务运行并按需拉起（带防并发锁）
    */
-  async ensureService(requireWeb: boolean): Promise<{ running: boolean; message: string; spawned: boolean }> {
+  async ensureService(requireWeb: boolean, options?: EnsureGatewayOptions): Promise<{ running: boolean; message: string; spawned: boolean }> {
     const generation = this.serviceGeneration;
     while (this.serviceStart) {
       await this.serviceStart;
@@ -61,7 +67,7 @@ class GatewayService {
     if (generation !== this.serviceGeneration) {
       return { running: false, message: "Magpie 启动已取消。", spawned: false };
     }
-    this.serviceStart = this.startService(requireWeb, generation);
+    this.serviceStart = this.startService(requireWeb, generation, options);
     try {
       return await this.serviceStart;
     } finally {
@@ -69,7 +75,11 @@ class GatewayService {
     }
   }
 
-  private async startService(requireWeb: boolean, generation: number): Promise<{ running: boolean; message: string; spawned: boolean }> {
+  private async startService(
+    requireWeb: boolean,
+    generation: number,
+    options?: EnsureGatewayOptions
+  ): Promise<{ running: boolean; message: string; spawned: boolean }> {
     try {
       // 1. 检查网关是否已处于在线状态
       const gatewayOnline = await gatewayClient.isHealthy();
@@ -106,7 +116,9 @@ class GatewayService {
         return { running: false, message: "本会话 Magpie 进程仍在运行，但服务未就绪。", spawned: false };
       }
 
-      const bin = await binaryResolver.resolveBinaryPath();
+      options?.onStarting?.();
+
+      const bin = await binaryResolver.resolveBinaryPath(options?.onProgress);
       if (generation !== this.serviceGeneration) {
         return { running: false, message: "Magpie 启动已取消。", spawned: false };
       }
