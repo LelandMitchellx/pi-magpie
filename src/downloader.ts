@@ -1,8 +1,8 @@
 import { createWriteStream, existsSync, chmodSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import https from "node:https";
-import http from "node:http";
+import { mkdir, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -70,7 +70,7 @@ export class MagpieDownloader {
       const location = res.headers.get("location");
       if (location) {
         const parts = location.split("/");
-        const tag = parts[parts.length - 1];
+        const tag = parts.at(-1);
         if (tag) return tag;
       }
     } catch (err: unknown) {
@@ -94,11 +94,16 @@ export class MagpieDownloader {
 
     const tempPath = `${localPath}.downloading`;
 
-    await this.downloadFileWithRedirects(downloadUrl, tempPath, onProgress);
-
-    // 重命名临时文件为正式可执行文件
-    const { rename } = await import("node:fs/promises");
-    await rename(tempPath, localPath);
+    try {
+      await this.downloadFileWithFetch(downloadUrl, tempPath, onProgress);
+      // 重命名临时文件为正式可执行文件
+      await rename(tempPath, localPath);
+    } catch (err: unknown) {
+      if (existsSync(tempPath)) {
+        await unlink(tempPath).catch(() => {});
+      }
+      throw err;
+    }
 
     // 在 Unix 系统上赋予可执行权限
     if (process.platform !== "win32") {
@@ -113,71 +118,54 @@ export class MagpieDownloader {
   }
 
   /**
-   * 支持多层 302/301 重定向与断点重试的文件流式下载
+   * 基于原生 fetch 与 Stream Pipeline 的流式文件下载（原生自动重定向，支持进度监听）
    */
-  private downloadFileWithRedirects(
+  private async downloadFileWithFetch(
     url: string,
     destPath: string,
-    onProgress?: (progress: DownloadProgress) => void,
-    maxRedirects = 6
+    onProgress?: (progress: DownloadProgress) => void
   ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (maxRedirects <= 0) {
-        return reject(new Error("Too many redirects while downloading Magpie release."));
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "User-Agent": "pi-magpie-plugin/0.1.0 (https://github.com/yetone/magpie)"
+        },
+        redirect: "follow",
+        signal: AbortSignal.timeout(60000)
+      });
+
+      if (!res.ok) {
+        throw new Error(`Download failed with HTTP status code ${res.status}`);
       }
 
-      const client = url.startsWith("https") ? https : http;
-      const req = client.get(
-        url,
-        {
-          headers: {
-            "User-Agent": "pi-magpie-plugin/0.1.0 (https://github.com/yetone/magpie)"
+      if (!res.body) {
+        throw new Error("Download response body is empty");
+      }
+
+      const contentLength = res.headers.get("content-length");
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      let received = 0;
+
+      const progressTracker = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          received += chunk.length;
+          if (onProgress && total > 0) {
+            const percent = Math.min(100, Math.round((received / total) * 100));
+            onProgress({ received, total, percent });
           }
-        },
-        (res) => {
-          // 处理 301 / 302 / 307 / 308 重定向
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            const redirectUrl = new URL(res.headers.location, url).toString();
-            res.resume();
-            return this.downloadFileWithRedirects(redirectUrl, destPath, onProgress, maxRedirects - 1)
-              .then(resolve)
-              .catch(reject);
-          }
-
-          if (res.statusCode !== 200) {
-            res.resume();
-            return reject(new Error(`Download failed with HTTP status code ${res.statusCode}`));
-          }
-
-          const total = parseInt(res.headers["content-length"] || "0", 10);
-          let received = 0;
-          const fileStream = createWriteStream(destPath);
-
-          res.on("data", (chunk: Buffer) => {
-            received += chunk.length;
-            if (onProgress && total > 0) {
-              const percent = Math.min(100, Math.round((received / total) * 100));
-              onProgress({ received, total, percent });
-            }
-          });
-
-          res.pipe(fileStream);
-
-          fileStream.on("finish", () => {
-            fileStream.close(() => resolve());
-          });
-
-          fileStream.on("error", (err) => {
-            fileStream.close(() => reject(err));
-          });
+          callback(null, chunk);
         }
-      );
-
-      req.on("error", (err) => reject(err));
-      req.setTimeout(30000, () => {
-        req.destroy(new Error("Connection timed out while downloading Magpie."));
       });
-    });
+
+      const fileStream = createWriteStream(destPath);
+      const webStream = Readable.fromWeb(res.body as import("node:stream/web").ReadableStream);
+
+      await pipeline(webStream, progressTracker, fileStream);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Magpie 自动下载失败: ${msg}`, { cause: err });
+    }
   }
 }
 
