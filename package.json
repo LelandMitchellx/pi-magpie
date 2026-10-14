@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --experimental-strip-types --test test/coordinator.test.ts test/cli.test.ts"
+    "test": "npm run typecheck && node --experimental-strip-types --test test/coordinator.test.ts test/cli.test.ts test/extension.test.ts"
   },
   "dependencies": {},
   "peerDependencies": {

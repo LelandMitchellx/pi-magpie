@@ -19,9 +19,22 @@ class GatewayClient {
   }
 
   /**
-   * 检查 magpie 网关健康状态
+   * 检查 magpie 网关健康状态（优先高频轻量 HTTP 探测，失败时降级 CLI 探活）
    */
   async isHealthy(): Promise<boolean> {
+    const addr = configManager.getGatewayAddress();
+    try {
+      const res = await fetch(`http://${addr}/`, {
+        method: "GET",
+        signal: AbortSignal.timeout(800)
+      });
+      if (res.status === 200) {
+        return true;
+      }
+    } catch {
+      // HTTP 探测失败，降级执行 CLI healthcheck 保底
+    }
+
     try {
       await this.runCommand("healthcheck");
       return true;

@@ -10,27 +10,33 @@ export default function magpieExtension(pi: {
   registerCommand: (name: string, command: ReturnType<typeof createMagpieCommand>) => void;
   on?: (
     event: string,
-    handler: (event: { sessionDir?: string }, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => void | Promise<void>
+    handler: (
+      event: { sessionDir?: string; reason?: string; targetSessionFile?: string; type?: string },
+      ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }
+    ) => void | Promise<void>
   ) => void;
 }) {
-  // 1. 注册宿主退出信号钩子 (会话即刻注销与归零销毁)
+  // 1. 统一注销与清理逻辑
   const cleanup = () => {
     gatewayService.handleSessionShutdown();
   };
 
+  // Pi 标准扩展会话关闭生命周期钩子
+  // 关键防御：在多会话切换 (reason 为 "resume" | "new" | "fork" | "reload") 场景下，
+  // 宿主 Pi 进程依然活跃存活，绝不能注销信标或销毁网关！
+  // 仅在用户真正退出 Pi 终端时 (reason === "quit") 才触发归零清理。
+  pi.on?.("session_shutdown", (event) => {
+    if (event?.reason && event.reason !== "quit") {
+      return;
+    }
+    cleanup();
+  });
+
+  // 宿主进程级退出保底（注意：不得在 SIGINT/SIGTERM 中主动 process.exit，以免干扰 Pi 自身的信号与终端交互）
   process.once("beforeExit", cleanup);
   process.once("exit", cleanup);
-  process.once("SIGINT", () => {
-    cleanup();
-    process.exit(0);
-  });
-  process.once("SIGTERM", () => {
-    cleanup();
-    process.exit(0);
-  });
   process.once("SIGHUP", () => {
     cleanup();
-    process.exit(0);
   });
 
   // 2. 注册极简 Slash 命令 /magpie

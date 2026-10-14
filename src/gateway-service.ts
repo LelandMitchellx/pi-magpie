@@ -42,7 +42,7 @@ class GatewayService {
       await fetch(`http://127.0.0.1:${configManager.defaultWebPort}/`, {
         method: "HEAD",
         redirect: "manual",
-        signal: AbortSignal.timeout(600)
+        signal: AbortSignal.timeout(1000)
       });
       return true;
     } catch {
@@ -130,7 +130,10 @@ class GatewayService {
       child.once("exit", () => this.clearService(child));
       child.unref();
 
-      for (let i = 0; i < 10; i++) {
+      // 弹性探测窗口：每次 500ms，最多探测 30 次（最长 15 秒）
+      // 在 Windows 或冷启动网络请求 (如 Google Antigravity) 场景下，Magpie 启动通常需 4~9 秒
+      const maxRetries = 30;
+      for (let i = 0; i < maxRetries; i++) {
         await new Promise((resolve) => setTimeout(resolve, 500));
         if (this.serviceProcess !== child) {
           return { running: false, message: `Magpie 启动失败或已停止${launchError ? `: ${launchError}` : "。"}`, spawned: false };
