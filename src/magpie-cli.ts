@@ -2,7 +2,7 @@ import { binaryResolver } from "./binary-resolver.ts";
 import { configManager } from "./config.ts";
 import type { DownloadProgress } from "./downloader.ts";
 import { gatewayClient } from "./gateway-client.ts";
-import { gatewayService, type EnsureGatewayOptions } from "./gateway-service.ts";
+import { gatewayService, type EnsureGatewayOptions, type SessionNotifyContext } from "./gateway-service.ts";
 import { sessionCoordinator, type ManagedServiceInfo } from "./session-coordinator.ts";
 import { webDashboard } from "./web-dashboard.ts";
 
@@ -40,6 +40,14 @@ export class MagpieCLI {
     return gatewayService.getSpawnedWebPid();
   }
 
+  isStarting(): boolean {
+    return gatewayService.isStarting();
+  }
+
+  async waitForStartup(): Promise<{ running: boolean; message: string; spawned: boolean } | null> {
+    return gatewayService.waitForStartup();
+  }
+
   getManagedInfo(): ManagedServiceInfo | null {
     return sessionCoordinator.getManagedService();
   }
@@ -50,6 +58,10 @@ export class MagpieCLI {
 
   registerSession(): void {
     sessionCoordinator.registerClient();
+  }
+
+  async handleSessionStart(ctx: SessionNotifyContext): Promise<void> {
+    return gatewayService.handleSessionStart(ctx);
   }
 
   handleSessionShutdown(): void {

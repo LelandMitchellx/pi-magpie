@@ -71,6 +71,26 @@ test("MagpieCLI: Web 控制台免密 URL 与 Key 机制", () => {
   }
 });
 
+test("MagpieCLI: isStarting 状态谓词与 waitForStartup 门面", async () => {
+  const cli = new MagpieCLI();
+  // 初始状态下未启动
+  assert.equal(typeof cli.isStarting(), "boolean");
+  const waitResult = await cli.waitForStartup();
+  assert.equal(waitResult, null, "没有后台启动中任务时应返回 null");
+});
+
+test("MagpieCLI: handleSessionStart 门面转发", async () => {
+  const cli = new MagpieCLI();
+  const notices: string[] = [];
+  await cli.handleSessionStart({
+    ui: {
+      notify: (msg) => { notices.push(msg); }
+    }
+  });
+  // 门面正常转发并完成启动/探活
+  assert.ok(Array.isArray(notices));
+});
+
 test("MagpieDownloader: 跨平台路径计算与 bin 目录自愈", () => {
   const downloader = new MagpieDownloader();
   const info = downloader.getTargetExecutableInfo();

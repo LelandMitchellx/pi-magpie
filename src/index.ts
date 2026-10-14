@@ -1,10 +1,9 @@
 import { createMagpieCommand } from "./commands.ts";
 import { gatewayService } from "./gateway-service.ts";
-import { webDashboard } from "./web-dashboard.ts";
 
 /**
  * Pi 原生扩展装配入口
- * 参数与返回值由 TypeScript 上下文自动推导，无需声明冗余类型接口
+ * 仅负责注册装配：挂载 /magpie 命令、session_start 保活与退出信号钩子
  */
 export default function magpieExtension(pi: {
   registerCommand: (name: string, command: ReturnType<typeof createMagpieCommand>) => void;
@@ -42,36 +41,9 @@ export default function magpieExtension(pi: {
   // 2. 注册极简 Slash 命令 /magpie
   pi.registerCommand("magpie", createMagpieCommand());
 
-  // 3. 监听会话启动事件 (按需拉起并反馈生命周期提示)
-  pi.on?.("session_start", async (_event, ctx) => {
-    try {
-      const res = await gatewayService.ensureGateway({
-        onStarting: () => {
-          ctx.ui.notify("Magpie 正在启动中，请稍候... ⏳", "info");
-        },
-        onProgress: (progress) => {
-          ctx.ui.notify(
-            `正在下载 Magpie 运行时: ${progress.percent}% (${(progress.received / 1024 / 1024).toFixed(1)}MB) 📥`,
-            "info"
-          );
-        }
-      });
-      if (res.spawned) {
-        const webUrl = webDashboard.getWebUrl();
-        const webKey = webDashboard.getWebKey();
-        const notifyMsg = webKey
-          ? `Magpie 启动完毕，Gateway 与 Web 面板已就绪 🟢\n控制台: ${webUrl}\n密钥: ${webKey}`
-          : `Magpie 启动完毕，Gateway 与 Web 面板已就绪 🟢 (${webUrl})`;
-        ctx.ui.notify(notifyMsg, "info");
-      } else if (!res.running) {
-        ctx.ui.notify(
-          `Magpie 启动失败: ${res.message || "服务未就绪，输入 /magpie 查看详情"} ❌`,
-          "error"
-        );
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`Magpie 启动异常: ${msg} ❌`, "error");
-    }
+  // 3. 监听会话启动事件 (后台非阻塞并发拉起，确保 Pi 宿主极速启动与后续扩展加载)
+  pi.on?.("session_start", (_event, ctx) => {
+    // 关键架构解耦：采用非阻塞后台异步任务执行拉起，绝不向 Pi 宿主返回未决 Promise
+    void gatewayService.handleSessionStart(ctx);
   });
 }

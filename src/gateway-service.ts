@@ -12,6 +12,12 @@ export interface EnsureGatewayOptions {
   onProgress?: (progress: DownloadProgress) => void;
 }
 
+export interface SessionNotifyContext {
+  ui: {
+    notify: (msg: string, level?: "info" | "warning" | "error") => void;
+  };
+}
+
 class GatewayService {
   private serviceProcess: ChildProcess | null = null;
   private serviceOwnsGateway = false;
@@ -34,6 +40,23 @@ class GatewayService {
 
   getSpawnedWebPid(): number | undefined {
     return this.hasSpawnedWeb() ? this.serviceProcess?.pid : undefined;
+  }
+
+  /**
+   * 判断网关服务当前是否正在进行后台启动/探活
+   */
+  isStarting(): boolean {
+    return this.serviceStart !== null;
+  }
+
+  /**
+   * 等待正在进行的后台启动任务完成（若无启动任务则立即返回 null）
+   */
+  async waitForStartup(): Promise<{ running: boolean; message: string; spawned: boolean } | null> {
+    if (this.serviceStart) {
+      return this.serviceStart;
+    }
+    return null;
   }
 
   /**
@@ -210,6 +233,41 @@ class GatewayService {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { stopped: false, message: `终止 Magpie 服务失败: ${msg}` };
+    }
+  }
+
+  /**
+   * 会话启动逻辑：以非阻塞后台拉起网关并在关键生命周期节点进行 UI 通知反馈
+   */
+  async handleSessionStart(ctx: SessionNotifyContext): Promise<void> {
+    try {
+      const res = await this.ensureGateway({
+        onStarting: () => {
+          ctx.ui.notify("Magpie 正在后台启动中，请稍候... ⏳", "info");
+        },
+        onProgress: (progress) => {
+          ctx.ui.notify(
+            `正在下载 Magpie 运行时: ${progress.percent}% (${(progress.received / 1024 / 1024).toFixed(1)}MB) 📥`,
+            "info"
+          );
+        }
+      });
+      if (res.spawned) {
+        const webUrl = webDashboard.getWebUrl();
+        const webKey = webDashboard.getWebKey();
+        const notifyMsg = webKey
+          ? `Magpie 启动完毕，Gateway 与 Web 面板已就绪 🟢\n控制台: ${webUrl}\n密钥: ${webKey}`
+          : `Magpie 启动完毕，Gateway 与 Web 面板已就绪 🟢 (${webUrl})`;
+        ctx.ui.notify(notifyMsg, "info");
+      } else if (!res.running) {
+        ctx.ui.notify(
+          `Magpie 启动失败: ${res.message || "服务未就绪，输入 /magpie 查看详情"} ❌`,
+          "error"
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`Magpie 启动异常: ${msg} ❌`, "error");
     }
   }
 

@@ -34,6 +34,8 @@ AI Agent 在 `pi-magpie` 代码库中作业时的核心上下文指南。
   - [ADR 0002: 零配置二进制探测天梯与自动流式下载](./docs/adr/0002-zero-config-binary-resolution.md)
   - [ADR 0003: Web 管理面板按需唤起机制](./docs/adr/0003-on-demand-web-lifecycle.md)
   - [ADR 0004: 多会话生命周期共享与独立 Watcher 守护机制](./docs/adr/0004-multi-session-lifecycle-watcher.md)
+  - [ADR 0005: Gateway 与 Web 单进程收敛与随机访问密钥设计](./docs/adr/0005-unified-service-process.md)
+  - [ADR 0006: 非阻塞后台异步拉起与扩展生命周期解耦](./docs/adr/0006-non-blocking-background-lifecycle.md)
 - [工程实战复盘与踩坑记录](./docs/retro.md)：技术细节与跨平台踩坑经验。
 
 ## 二进制探测天梯规则

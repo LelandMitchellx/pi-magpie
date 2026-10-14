@@ -85,3 +85,17 @@
      - **启动完毕**：网关与 Web 双就绪后，呈现包含控制台地址与免密 Key 的就绪卡片 🟢；
      - **启动失败/异常**：明确呈现超时、端口冲突或进程报错，错误级别降级上报 ❌。
   2. **冷启动与活跃复用正交解耦**：针对多会话切换或已有活跃实例的场景（`res.running && !res.spawned`），继续坚守 PRD 0004 的“零干扰”原则，保持完全静默复用，绝不产生任何恼人的冗余弹窗。
+
+
+---
+
+## 10. 扩展会话启动串行阻塞与非阻塞后台拉起解耦 (Non-blocking Async Launch & Lifecycle Decoupling)
+- **踩坑现象**：由于 Magpie 在 Windows 冷启动及远端模型供应商凭证握手通常需要 8.5~9 秒（若触发下载则更久），当开发者打开 Pi 终端时，整个 Pi 陷入假死无响应状态数秒，且后续其它原生扩展与 MCP 服务的加载全部被阻断延后。
+- **根因剖析**：
+  Pi Coding Agent 的底层扩展运行时（`runner.ts` / `agent-session.ts`）在派发 `session_start` 生命周期事件时，采用顺序循环 `await handler(event, ctx)` 的机制。
+  先前的 `src/index.ts` 中将回调函数声明为 `async (_event, ctx) => { await gatewayService.ensureGateway(...) }`，导致向 Pi 宿主返回了一个长达 8.5 秒以上的未决 Promise。在宿主视角下，必须等待该 Promise 完全兑现后才会继续执行 MCP 服务连接、`resources_discover` 发现与 TUI 输入框渲染，严重破坏了宿主的启动性能与用户体验。
+- **工程解法**：
+  1. **非阻塞立即交还控制权**：`src/index.ts` 中的 `session_start` 回调函数改造为普通同步函数，返回 `undefined`，内部通过独立异步任务 `void handleSessionStart(ctx)` 在后台并发拉起网关，Pi 宿主在 0ms 内完成事件分发并立即继续执行后续扩展装配与终端渲染。
+  2. **非阻塞异步 Toast 反馈**：保留原有的三态提示机制，在后台静默拉起开始时弹出 `Magpie 正在后台启动中... ⏳`，就绪后提示绿色完成卡片，全程不抢占终端打字焦点。
+  3. **过渡态防卡顿卡片 (In-Progress State)**：在 `GatewayService` 与 `MagpieCLI` 中增加 `isStarting()` 谓词。若用户在前 8 秒后台启动期提前敲击 `/magpie`，指令不再等待也不误报离线，而是立即输出 `⏳ 启动中 (Starting - 后台冷启动中，请稍后刷新)` 中间态卡片。
+  4. **固化 ADR 0006 与防退化单测**：在 `test/extension.test.ts` 中通过 `assert.equal(onSessionStart({}, fakeCtx), undefined)` 断言严格确保启动逻辑绝不阻断宿主主线程。

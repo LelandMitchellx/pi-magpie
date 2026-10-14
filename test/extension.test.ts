@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import magpieExtension from "../src/index.ts";
 import { gatewayService } from "../src/gateway-service.ts";
+import { createMagpieCommand } from "../src/commands.ts";
 
 test("magpieExtension: session_shutdown 会话切换防重启防护", () => {
   const handlers: Record<string, ((event: any, ctx: any) => void)[]> = {};
@@ -54,8 +55,8 @@ test("magpieExtension: session_shutdown 会话切换防重启防护", () => {
   }
 });
 
-test("magpieExtension: session_start 启动中、启动完成与失败提示", async () => {
-  const handlers: Record<string, ((event: any, ctx: any) => Promise<void>)[]> = {};
+test("magpieExtension: session_start 非阻塞立即交还控制权", () => {
+  const handlers: Record<string, ((event: any, ctx: any) => void)[]> = {};
   const fakePi = {
     registerCommand: () => {},
     on: (event: string, handler: any) => {
@@ -69,10 +70,22 @@ test("magpieExtension: session_start 启动中、启动完成与失败提示", a
   assert.ok(startHandlers && startHandlers.length > 0, "应当注册 session_start 监听器");
   const onSessionStart = startHandlers[0];
 
+  const fakeCtx = {
+    ui: {
+      notify: () => {}
+    }
+  };
+
+  // 关键断言：session_start 处理器必须返回 undefined (同步立即完成)，绝不返回未决 Promise 阻断 Pi 宿主启动
+  const returnVal = onSessionStart({}, fakeCtx);
+  assert.equal(returnVal, undefined, "session_start 处理器必须为同步非阻塞（返回 undefined）");
+});
+
+test("gatewayService: handleSessionStart 启动中、启动完成与失败提示", async () => {
   const originalEnsure = gatewayService.ensureGateway;
 
   try {
-    // 1. 成功拉起场景：应触发“正在启动中”与“启动完毕”通知
+    // 1. 成功拉起场景：应触发“正在后台启动中”与“启动完毕”通知
     const notifications: { msg: string; level?: string }[] = [];
     const fakeCtx = {
       ui: {
@@ -87,9 +100,9 @@ test("magpieExtension: session_start 启动中、启动完成与失败提示", a
       return { running: true, message: "启动成功", spawned: true };
     };
 
-    await onSessionStart({}, fakeCtx);
+    await gatewayService.handleSessionStart(fakeCtx);
     assert.equal(notifications.length, 2, "成功启动时应产生 2 条通知（启动中 + 启动完毕）");
-    assert.ok(notifications[0].msg.includes("正在启动中"), "第一条通知应为正在启动中");
+    assert.ok(notifications[0].msg.includes("正在后台启动中"), "第一条通知应为正在后台启动中");
     assert.equal(notifications[0].level, "info");
     assert.ok(notifications[1].msg.includes("启动完毕"), "第二条通知应为启动完毕");
     assert.equal(notifications[1].level, "info");
@@ -100,7 +113,7 @@ test("magpieExtension: session_start 启动中、启动完成与失败提示", a
       return { running: false, message: "端口已被占用", spawned: false };
     };
 
-    await onSessionStart({}, fakeCtx);
+    await gatewayService.handleSessionStart(fakeCtx);
     assert.equal(notifications.length, 1, "失败时应产生 1 条通知");
     assert.ok(notifications[0].msg.includes("Magpie 启动失败: 端口已被占用"), "应包含失败原因");
     assert.equal(notifications[0].level, "error");
@@ -111,7 +124,7 @@ test("magpieExtension: session_start 启动中、启动完成与失败提示", a
       throw new Error("spawn failed ENOENT");
     };
 
-    await onSessionStart({}, fakeCtx);
+    await gatewayService.handleSessionStart(fakeCtx);
     assert.equal(notifications.length, 1, "异常时应产生 1 条通知");
     assert.ok(notifications[0].msg.includes("Magpie 启动异常: spawn failed ENOENT"), "应包含异常信息");
     assert.equal(notifications[0].level, "error");
@@ -122,9 +135,35 @@ test("magpieExtension: session_start 启动中、启动完成与失败提示", a
       return { running: true, message: "已复用活跃服务", spawned: false };
     };
 
-    await onSessionStart({}, fakeCtx);
+    await gatewayService.handleSessionStart(fakeCtx);
     assert.equal(notifications.length, 0, "复用已有服务时不应触发通知弹窗");
   } finally {
     gatewayService.ensureGateway = originalEnsure;
+  }
+});
+
+test("magpieCommand: 网关后台启动中提前执行 /magpie 即刻返回启动中过渡卡片", async () => {
+  const originalIsStarting = gatewayService.isStarting;
+
+  try {
+    // 模拟网关正在后台启动中的状态
+    gatewayService.isStarting = () => true;
+
+    const cmd = createMagpieCommand();
+    const notifications: { msg: string; level?: string }[] = [];
+    const fakeCtx = {
+      ui: {
+        notify: (msg: string, level?: "info" | "warning" | "error") => {
+          notifications.push({ msg, level });
+        }
+      }
+    };
+
+    await cmd.handler("", fakeCtx);
+    assert.equal(notifications.length, 1, "应当产生 1 条状态卡片通知");
+    assert.ok(notifications[0].msg.includes("⏳ 启动中 (Starting - 后台冷启动中，请稍后刷新)"), "应呈现启动中过渡卡片");
+    assert.equal(notifications[0].level, "info");
+  } finally {
+    gatewayService.isStarting = originalIsStarting;
   }
 });
