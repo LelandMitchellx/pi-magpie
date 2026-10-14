@@ -54,7 +54,8 @@ async function showMagpieStatusAndWeb(ctx: { ui: { notify: (msg: string, level?:
       `网关归属: ${formatProcessOwnerText(healthy)}`,
       `会话联动: ${autoStop ? "🟢 已开启 (支持多 Pi 共享，所有会话退出时即刻关闭)" : "⚪ 已关闭 (保持后台常驻)"}`,
       `当前会话: PID ${process.pid} (集群活跃 Pi: ${clients.length} 个)`,
-      `当前模型: ${currentPi}`
+      `当前模型: ${currentPi}`,
+      `操作指引: 可使用 /magpie upgrade 受控升级重启，或 /magpie restart 重新拉起`
     ].join("\n");
 
     ctx.ui.notify(info, healthy ? "info" : "warning");
@@ -64,14 +65,31 @@ async function showMagpieStatusAndWeb(ctx: { ui: { notify: (msg: string, level?:
   }
 }
 
+async function handleMagpieUpgrade(ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) {
+  const res = await gatewayService.upgradeAndRestart(ctx);
+  ctx.ui.notify(res.message, res.success ? "info" : "error");
+}
+
+async function handleMagpieRestart(ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) {
+  const res = await gatewayService.restartService(ctx);
+  ctx.ui.notify(res.message, res.success ? "info" : "error");
+}
+
 /**
  * 创建 /magpie 指令配置对象（由 TypeScript 自动推导结构）
  */
 export function createMagpieCommand() {
   return {
-    description: "查看 Magpie 网关运行状态与 Web 控制面板地址",
-    handler: async (_args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
-      await showMagpieStatusAndWeb(ctx);
+    description: "查看 Magpie 网关状态或受控升级重启 (/magpie [upgrade|restart])",
+    handler: async (args: string, ctx: { ui: { notify: (msg: string, level?: "info" | "warning" | "error") => void } }) => {
+      const sub = (args || "").trim().toLowerCase();
+      if (sub === "upgrade" || sub === "update") {
+        await handleMagpieUpgrade(ctx);
+      } else if (sub === "restart") {
+        await handleMagpieRestart(ctx);
+      } else {
+        await showMagpieStatusAndWeb(ctx);
+      }
     }
   };
 }

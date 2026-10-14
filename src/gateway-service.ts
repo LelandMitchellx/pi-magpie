@@ -145,7 +145,7 @@ class GatewayService {
       if (generation !== this.serviceGeneration) {
         return { running: false, message: "Magpie 启动已取消。", spawned: false };
       }
-      const key = process.env.MAGPIE_WEB_KEY?.trim() || randomBytes(32).toString("hex");
+      const key = process.env.MAGPIE_WEB_KEY?.trim() || webDashboard.getWebKey() || randomBytes(32).toString("hex");
       const child = spawn(bin, ["web", "--addr", `127.0.0.1:${configManager.defaultWebPort}`, "--no-open"], {
         detached: true,
         stdio: "ignore",
@@ -279,6 +279,104 @@ class GatewayService {
       this.clearService(this.serviceProcess);
     }
     sessionCoordinator.terminateManagedServiceIfLastClient();
+  }
+
+  /**
+   * 执行受控升级并优雅重启 Magpie 服务
+   */
+  async upgradeAndRestart(ctx?: SessionNotifyContext): Promise<{ success: boolean; message: string; updated: boolean }> {
+    try {
+      ctx?.ui.notify("正在检查并执行 Magpie 升级更新... ⏳", "info");
+
+      const managed = sessionCoordinator.getManagedService();
+      const hasSpawned = this.hasSpawnedWeb();
+      const isStarter = managed?.startedByPiPid === process.pid;
+      const isManagedRunning = hasSpawned || isStarter;
+
+      // 1. 若当前服务正由本会话托管运行，先优雅停止，释放端口与可执行文件句柄
+      if (isManagedRunning) {
+        this.stopGateway(true);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+
+      // 2. 优先执行原生 CLI 更新
+      let isLatest = false;
+      const nativeRes = await binaryResolver.runNativeUpdate();
+
+      if (nativeRes.success) {
+        isLatest = nativeRes.isLatest;
+      } else {
+        // 原生 CLI 失败时，由内置下载器进行流式兜底
+        ctx?.ui.notify("原生更新未就绪，正在使用内置流式下载器拉取最新版本... 📥", "info");
+        try {
+          await binaryResolver.forceInstallPluginBinary((progress) => {
+            ctx?.ui.notify(
+              `正在下载最新 Magpie: ${progress.percent}% (${(progress.received / 1024 / 1024).toFixed(1)}MB) 📥`,
+              "info"
+            );
+          });
+        } catch (downloadErr: unknown) {
+          const dlMsg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
+          // 若下载也失败且之前是在运行状态，尝试重新拉起原服务
+          if (isManagedRunning) {
+            await this.ensureGateway();
+          }
+          return { success: false, message: `Magpie 升级失败: ${dlMsg}`, updated: false };
+        }
+      }
+
+      // 3. 重新以受控状态拉起服务
+      ctx?.ui.notify("更新完成，正在以受控状态拉起 Magpie 服务... ⏳", "info");
+      const startRes = await this.ensureGateway();
+
+      if (!startRes.running) {
+        return {
+          success: false,
+          message: `Magpie 升级完成但重新启动失败: ${startRes.message}`,
+          updated: !isLatest
+        };
+      }
+
+      const webUrl = webDashboard.getWebUrl();
+      const pid = this.getSpawnedWebPid();
+      const statusText = isLatest
+        ? `Magpie 当前已是最新版本，服务已受控就绪 🟢 (PID: ${pid})\n控制面板: ${webUrl}`
+        : `Magpie 已成功升级并完成受控重启 🟢 (PID: ${pid})\n控制面板: ${webUrl}`;
+
+      return {
+        success: true,
+        message: statusText,
+        updated: !isLatest
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `升级流程发生异常: ${msg}`, updated: false };
+    }
+  }
+
+  /**
+   * 受控重启当前 Magpie 服务
+   */
+  async restartService(ctx?: SessionNotifyContext): Promise<{ success: boolean; message: string }> {
+    try {
+      ctx?.ui.notify("正在受控重启 Magpie 服务... ⏳", "info");
+      this.stopGateway(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      const res = await this.ensureGateway();
+      if (res.running) {
+        const webUrl = webDashboard.getWebUrl();
+        const pid = this.getSpawnedWebPid();
+        return {
+          success: true,
+          message: `Magpie 服务已成功受控重启 🟢 (PID: ${pid})\n控制面板: ${webUrl}`
+        };
+      }
+      return { success: false, message: `Magpie 重启失败: ${res.message}` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `重启发生异常: ${msg}` };
+    }
   }
 }
 

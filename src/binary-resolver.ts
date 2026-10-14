@@ -96,6 +96,26 @@ class BinaryResolver {
   }
 
   /**
+   * 使用 Magpie 原生 CLI 执行更新检查或安装
+   * 优先尝试原生 `magpie update`，失败时可由 downloader 兜底
+   */
+  async runNativeUpdate(): Promise<{ success: boolean; output: string; isLatest: boolean }> {
+    const bin = await this.resolveBinaryPath();
+    try {
+      const { stdout, stderr } = await execAsync(`"${bin}" update`, {
+        timeout: 90000,
+        env: { ...process.env }
+      });
+      const combined = `${stdout}\n${stderr}`.trim();
+      const isLatest = combined.includes("is the latest") || combined.includes("已经是最新");
+      return { success: true, output: combined, isLatest };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, output: msg, isLatest: false };
+    }
+  }
+
+  /**
    * 手动强制触发更新/重新下载到插件目录
    */
   async forceInstallPluginBinary(onProgress?: (progress: DownloadProgress) => void): Promise<string> {
