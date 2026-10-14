@@ -99,3 +99,20 @@
   2. **非阻塞异步 Toast 反馈**：保留原有的三态提示机制，在后台静默拉起开始时弹出 `Magpie 正在后台启动中... ⏳`，就绪后提示绿色完成卡片，全程不抢占终端打字焦点。
   3. **过渡态防卡顿卡片 (In-Progress State)**：在 `GatewayService` 与 `MagpieCLI` 中增加 `isStarting()` 谓词。若用户在前 8 秒后台启动期提前敲击 `/magpie`，指令不再等待也不误报离线，而是立即输出 `⏳ 启动中 (Starting - 后台冷启动中，请稍后刷新)` 中间态卡片。
   4. **固化 ADR 0006 与防退化单测**：在 `test/extension.test.ts` 中通过 `assert.equal(onSessionStart({}, fakeCtx), undefined)` 断言严格确保启动逻辑绝不阻断宿主主线程。
+
+---
+
+## 11. 自更新进程重启导致的 PID 裂解脱管与闭环受控升级方案 (Controlled Upgrade & Process Rebinding)
+- **踩坑现象**：用户在 Magpie 内更新或更新重启后，退出 Pi 终端时 Magpie 不会被关闭，仍孤儿驻留在 3430 端口；后续重新打开 Pi 终端时，插件无法重新接管该服务，误将其显示为“外部常驻服务”。
+- **根因剖析**：
+  1. **内存句柄断开**：Magpie 更新重启后旧进程退出，触发 `child.once("exit") -> clearService(child)`，插件内存中的 `gatewayService.serviceProcess` 被置 null，父子句柄链彻底断开。
+  2. **磁盘信标僵死与自毁**：`~/.pi/agent/magpie-managed.json` 静态记录着旧 PID。当后续检查 `isPidAlive(旧pid)` 为 false 时，`getManagedService()` 误将信标判定为已废弃并直接删空，造成元数据彻底遗失。
+  3. **退出销毁逻辑短路**：在所有 Pi 会话退出触发 `terminateManagedServiceIfLastClient()` 时，因信标已被删空且内存句柄为 null，插件直接放弃终止，导致重启后的新 Magpie 孤儿驻留。
+  4. **Windows 文件锁写冲突**：在 Windows 上直接运行更新命令，由于正在运行的 `magpie.exe` 进程占用了二进制文件句柄，操作系统会拒绝写入（`EBUSY` / `Access is denied`）。
+- **工程解法**：
+  1. **构建受控升级闭环 (`/magpie upgrade`)**：先主动调用 `stopGateway(true)` 优雅停止当前托管网关，安全释放端口与二进制文件写入锁。
+  2. **双引擎升级保障**：在 `BinaryResolver` 中优先调用官方原生 `magpie update` 命令；若遇超时或 CLI 异常，自动平滑回退至内置流式下载器 `downloader` 兜底下载。
+  3. **受控拉起与句柄重绑定**：更新完成后以受控参数重新拉起服务，采集新生成的 PID 重新持久化写入信标，并将新子进程句柄收敛进 `serviceProcess`。
+  4. **控制台鉴权密钥平滑继承**：拉起新实例时复用先前的 `webKey`，保证用户浏览器已打开的 Web 面板无需重新登录或更新 URL。
+  5. **扩充极简子指令体系**：在保留极简单一 `/magpie` 命令入口的基础上，支持 `/magpie upgrade`、`/magpie update` 与 `/magpie restart`，并在看板卡片提供贴心操作指引。
+
